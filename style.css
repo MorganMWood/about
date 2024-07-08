@@ -35,6 +35,13 @@ header h1 {
     margin: 10px 0;
 }
 
+/* Add this section to style headers with dividers */
+h2, h3, h4 {
+    border-bottom: 2px solid #ccc; /* Light gray divider */
+    padding-bottom: 5px;
+    margin-bottom: 15px; /* Adjust spacing */
+}
+
 header p {
     margin: 5px 0;
 }
