@@ -60,7 +60,7 @@ h2 {
 }
 
 .course-box {
-    background-color: #e0e7ff; /* Light blue */
+    background-color: #4b9cd3; /* Carolina blue */
     padding: 15px;
     margin-bottom: 20px;
     border: 1px solid #001f3f; /* Navy blue */
@@ -69,6 +69,16 @@ h2 {
 
 .course-box h3 {
     margin: 0 0 10px 0;
+    color: #fff; /* White text for contrast */
+}
+
+.course-box p {
+    color: #fff; /* White text for contrast */
+}
+
+.course-box a {
+    color: #fff; /* White text for contrast */
+    text-decoration: underline;
 }
 
 footer {
