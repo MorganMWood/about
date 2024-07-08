@@ -9,7 +9,7 @@ body {
 }
 
 header {
-    background-color: #333;
+    background-color: #001f3f; /* Navy blue */
     color: #fff;
     padding: 10px 0;
     text-align: center;
@@ -43,7 +43,6 @@ header .headshot {
     margin-top: 15px;
     width: 150px;
     height: auto;
-    border-radius: 50%;
     border: 3px solid #fff;
 }
 
@@ -56,14 +55,14 @@ section {
 }
 
 h2 {
-    color: #333;
+    color: #001f3f; /* Navy blue */
     margin-bottom: 20px;
 }
 
 footer {
     text-align: center;
     padding: 10px;
-    background-color: #333;
+    background-color: #001f3f; /* Navy blue */
     color: #fff;
 }
 
