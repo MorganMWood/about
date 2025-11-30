@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The Queue Cascade</title>
+  <!-- Using Tailwind for quick, modern styling -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      font-family: 'Inter', Arial, sans-serif;
+    }
+    .histogram {
+      /* Ensure canvas children resize properly */
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+    }
+    canvas {
+      /* Make canvas responsive within its container */
+      width: 100%;
+      height: 100%;
+    }
+    .person {
+      position: absolute;
+      bottom: 10px;
+      font-size: 2rem;
+      opacity: 0;
+      /* Animation for appearing */
+      transform: translateY(20px);
+      transition: opacity 0.5s ease-out, transform 0.5s ease-out;
+    }
+    .person.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 flex flex-col items-center min-h-screen p-4">
+
+  <h1 class="text-3xl font-bold text-slate-900 mb-4">Poisson Arrival Process Simulation</h1>
+
+  <!-- Histograms -->
+  <div class="w-full max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+    <div class="histogram bg-white p-4 rounded-lg shadow-md h-64">
+      <canvas id="interarrivalCanvas"></canvas>
+    </div>
+    <div class="histogram bg-white p-4 rounded-lg shadow-md h-64">
+      <canvas id="arrivalsPerSecCanvas"></canvas>
+    </div>
+  </div>
+
+  <!-- Simulation Area -->
+  <div id="simArea" class="relative w-full max-w-5xl h-64 bg-white rounded-lg shadow-md overflow-hidden border border-slate-200">
+    <!-- People will be added here -->
+  </div>
+
+  <!-- Statistics -->
+  <div class="w-full max-w-5xl grid grid-cols-3 gap-4 my-4 text-center">
+    <div class="bg-white p-4 rounded-lg shadow-sm">
+      <p class="text-sm text-slate-500">Total Arrivals</p>
+      <p id="totalArrivals" class="text-2xl font-bold">0</p>
+    </div>
+    <div class="bg-white p-4 rounded-lg shadow-sm">
+      <p class="text-sm text-slate-500">Time Since Last (s)</p>
+      <p id="timeSince" class="text-2xl font-bold">--</p>
+    </div>
+    <div class="bg-white p-4 rounded-lg shadow-sm">
+      <p class="text-sm text-slate-500">Last Interarrival (s)</p>
+      <p id="interarrival" class="text-2xl font-bold">--</p>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls bg-white p-4 rounded-lg shadow-sm w-full max-w-md flex flex-col items-center gap-4">
+    <div class="slider-container flex items-center gap-3 w-full">
+      <label for="rateSlider" class="text-sm font-medium">Arrival Rate (λ):</label>
+      <input type="range" id="rateSlider" min="0.1" max="5" step="0.1" value="1.0" class="w-full" />
+      <span id="rateValue" class="text-sm font-medium text-slate-600 w-16 text-right">1.0/s</span>
+    </div>
+    <div class="flex gap-4">
+      <button id="playPauseBtn" class="px-6 py-2 rounded-lg text-white font-semibold bg-blue-600 hover:bg-blue-700 shadow-sm">Play</button>
+      <button id="resetBtn" class="px-6 py-2 rounded-lg text-white font-semibold bg-red-600 hover:bg-red-700 shadow-sm">Reset</button>
+    </div>
+  </div>
+
+  <footer class="mt-8 text-center text-slate-500 text-sm max-w-lg">
+        <div style="font-family: Arial, sans-serif; padding: 15px; border-top: 1px solid #ccc; font-size: 14px; color: #333;">
+            
+            <div style="margin-bottom: 15px;">
+                <h4 style="font-size: 2em; margin-bottom: 5px; color: #555;">🕹️ How to Run the Simulation</h4>
+                <p>To start, adjust the <strong>Arrival Rate</strong> (Lambda λ). This value represents the average number of events (people arriving) expected per second. The simulation begins when you press the <strong>"Play"</strong> button.</p>
+                </div>
+<div style="margin-bottom: 15px;">
+                <h4 style="font-size: 2em; margin-bottom: 5px; color: #555;">💡 What the Poisson Process Means</h4>
+                <p> This simulation models a <strong>Poisson Process</strong>, which describes how events occur <strong>randomly and independently</strong> over time at a constant average rate. </p>
+        	<p> The key feature is that the actual time <em>between</em> any two arrivals (the <strong>Interarrival Time</strong>) is completely random and follows an <strong>Exponential Distribution</strong>. This randomness is what you see in the simulation: even if the average rate is 1.0 per second, you might see two quick arrivals followed by a long wait. </p>
+                </div>
+        </div>
+        </footer>
+
+<script>
+  // DOM Elements
+  const simArea = document.getElementById("simArea");
+  const totalDisplay = document.getElementById("totalArrivals");
+  const sinceDisplay = document.getElementById("timeSince");
+  const interDisplay = document.getElementById("interarrival");
+  const rateSlider = document.getElementById("rateSlider");
+  const rateValue = document.getElementById("rateValue");
+  const playPauseBtn = document.getElementById("playPauseBtn");
+  const resetBtn = document.getElementById("resetBtn");
+  const interCanvas = document.getElementById("interarrivalCanvas");
+  const interCtx = interCanvas.getContext("2d");
+  const arrivalsCanvas = document.getElementById("arrivalsPerSecCanvas");
+  const arrivalsCtx = arrivalsCanvas.getContext("2d");
+
+  // State Variables
+  let isRunning = false;
+  let rate = parseFloat(rateSlider.value);
+  let people = [];
+  let totalArrivals = 0;
+  let lastArrivalTime = null;
+  let interarrivalTime = null;
+  let timerInterval = null;
+  let nextArrivalTimeout = null;
+  let timeSinceLast = 0;
+  let interarrivalHistory = [];
+  let arrivalsPerSecondHistory = [];
+  let startTime = null;
+
+  // --- REQUEST 1: Updated list of figures ---
+  // Includes a plain stick figure and diverse human emojis
+  const figures = [
+    "🧍", // Plain stick figure
+    "🧑🏻", "👩🏻", "👨🏻", "🧑🏼", "👩🏼", "👨🏼", "🧑🏽", "👩🏽", "👨🏽",
+    "🧑🏾", "👩🏾", "👨🏾", "🧑🏿", "👩🏿", "👨🏿", "👩‍🦰", "👨‍🦱",
+    "👩‍🦳", "👨‍🦳", "🧓", "👴", "👵"
+  ];
+
+  // Event Listeners
+  rateSlider.addEventListener("input", () => {
+    rate = parseFloat(rateSlider.value);
+    rateValue.textContent = rate.toFixed(1) + "/s";
+  });
+  playPauseBtn.addEventListener("click", toggleSimulation);
+  resetBtn.addEventListener("click", resetSimulation);
+
+  // Core Simulation Logic
+  function exponentialSample(lambda) {
+    // Generates a random sample from an exponential distribution
+    return -Math.log(1.0 - Math.random()) / lambda;
+  }
+
+  function scheduleNextArrival() {
+    if (!isRunning || rate <= 0) return;
+    
+    // Time until next arrival
+    const inter = exponentialSample(rate);
+    
+    nextArrivalTimeout = setTimeout(() => {
+      if (!isRunning) return; // Check again in case pause was hit
+      
+      const now = performance.now() / 1000;
+      if (lastArrivalTime !== null) {
+        interarrivalTime = now - lastArrivalTime;
+        interarrivalHistory.push(interarrivalTime);
+        // Keep history bounded for performance
+        if (interarrivalHistory.length > 500) interarrivalHistory.shift();
+        drawInterarrivalHistogram();
+      }
+      
+      lastArrivalTime = now;
+      addPerson();
+      totalArrivals++;
+      totalDisplay.textContent = totalArrivals;
+
+      // Update arrivals per second
+      if (startTime) {
+        const elapsedSec = Math.floor(now - startTime);
+        if (elapsedSec >= 0) {
+          arrivalsPerSecondHistory[elapsedSec] = (arrivalsPerSecondHistory[elapsedSec] || 0) + 1;
+          drawArrivalsPerSecondHistogram();
+        }
+      }
+
+      if (interarrivalTime !== null) interDisplay.textContent = interarrivalTime.toFixed(2);
+      timeSinceLast = 0;
+      
+      if (isRunning) scheduleNextArrival();
+    }, inter * 1000);
+  }
+
+  function addPerson() {
+    const person = document.createElement("div");
+    person.className = "person";
+    
+    // --- REQUEST 1: Pick a random figure from the new list ---
+    const figure = figures[Math.floor(Math.random() * figures.length)];
+    person.textContent = figure;
+    
+    person.style.left = Math.random() * 85 + 7.5 + "%"; // Position horizontally
+    simArea.appendChild(person);
+    
+    // Trigger the 'show' class to animate
+    setTimeout(() => person.classList.add("show"), 10);
+    
+    people.push(person);
+    
+    // Remove person from DOM after a while
+    /* REMOVED: This block made figures disappear
+    setTimeout(() => {
+      if (person.parentElement) {
+        person.parentElement.removeChild(person);
+      }
+      people = people.filter(p => p !== person);
+    }, 5000); // Fades out in 5 seconds
+    */
+  }
+
+  function startTimer() {
+    if (timerInterval) clearInterval(timerInterval);
+    timerInterval = setInterval(() => {
+      if (isRunning && lastArrivalTime !== null) {
+        timeSinceLast += 0.1;
+        sinceDisplay.textContent = timeSinceLast.toFixed(1);
+      }
+      // Keep arrivals/sec histogram updated to show passing seconds with 0 arrivals
+      if (startTime) {
+          drawArrivalsPerSecondHistogram();
+      }
+    }, 100);
+  }
+
+  function toggleSimulation() {
+    isRunning = !isRunning;
+    playPauseBtn.textContent = isRunning ? "Pause" : "Play";
+    playPauseBtn.classList.toggle('bg-blue-600', !isRunning);
+    playPauseBtn.classList.toggle('hover:bg-blue-700', !isRunning);
+    playPauseBtn.classList.toggle('bg-amber-600', isRunning);
+    playPauseBtn.classList.toggle('hover:bg-amber-700', isRunning);
+
+    if (isRunning) {
+      if (!startTime) startTime = performance.now() / 1000;
+      if (lastArrivalTime === null) lastArrivalTime = performance.now() / 1000;
+      scheduleNextArrival();
+      startTimer();
+    } else {
+      clearTimeout(nextArrivalTimeout);
+      clearInterval(timerInterval);
+      // Update histogram one last time on pause to capture final second counts
+      if(startTime) drawArrivalsPerSecondHistogram(); 
+    }
+  }
+
+  function resetSimulation() {
+    clearTimeout(nextArrivalTimeout);
+    clearInterval(timerInterval);
+    isRunning = false;
+    
+    playPauseBtn.textContent = "Play";
+    playPauseBtn.classList.add('bg-blue-600');
+    playPauseBtn.classList.add('hover:bg-blue-700');
+    playPauseBtn.classList.remove('bg-amber-600');
+    playPauseBtn.classList.remove('hover:bg-amber-700');
+    
+    people.forEach(p => {
+      if (p.parentElement) p.parentElement.removeChild(p);
+    });
+    people = [];
+    
+    totalArrivals = 0;
+    lastArrivalTime = null;
+    interarrivalTime = null;
+    timeSinceLast = 0;
+    interarrivalHistory = [];
+    arrivalsPerSecondHistory = [];
+    startTime = null;
+    
+    totalDisplay.textContent = "0";
+    sinceDisplay.textContent = "--";
+    interDisplay.textContent = "--";
+    
+    drawInterarrivalHistogram();
+    drawArrivalsPerSecondHistogram();
+  }
+
+  // --- REQUEST 2: Histogram Drawing Functions (Updated) ---
+
+  /* REMOVED: This function is no longer needed as titles are drawn inside each histogram function
+  function drawHistogramText(ctx, w, h, text) {
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = "#9ca3af"; // text-slate-400
+    ctx.font = "16px Inter";
+    ctx.textAlign = "center";
+    ctx.fillText(text, w / 2, h / 2);
+  }
+  */
+
+  function drawInterarrivalHistogram() {
+    const w = interCanvas.width = interCanvas.clientWidth;
+    const h = interCanvas.height = interCanvas.clientHeight;
+    
+    interCtx.clearRect(0, 0, w, h);
+
+    // --- Draw Title ---
+    interCtx.fillStyle = "#1e293b"; // slate-800
+    interCtx.font = "bold 14px Inter";
+    interCtx.textAlign = "center";
+    interCtx.fillText("Interarrival Times (s)", w / 2, 25);
+
+    // --- Binning (Request: Always 10 bars) ---
+    const nBins = 10;
+    // Get max value from data, with a minimum of 1.0 to ensure axis is drawn
+    const maxVal = Math.max(1, ...interarrivalHistory); 
+    const binWidth = maxVal / nBins; // Width of each bin (in data units)
+    const bins = new Array(nBins).fill(0);
+    
+    interarrivalHistory.forEach(t => {
+      // Find bin index, clamp to last bin if t == maxVal
+      const binIndex = Math.min(Math.floor(t / binWidth), nBins - 1); 
+      bins[binIndex]++;
+    });
+
+    const maxCount = Math.max(1, ...bins);
+    
+    // Padding
+    const topPadding = 40;
+    const bottomPadding = 30;
+    const xPadding = 30;
+    const usableWidth = w - xPadding * 2;
+    const usableHeight = h - topPadding - bottomPadding;
+
+    // --- Bar width (Request: Touching bars) ---
+    const barWidth = usableWidth / nBins; // Each bar takes 1/10th of the usable width
+
+    interCtx.font = "10px Inter";
+
+    // Draw bars
+    for (let i = 0; i < nBins; i++) {
+      const barHeight = (bins[i] / maxCount) * usableHeight;
+      const x = xPadding + i * barWidth; // No gap, bars are sequential
+      const y = h - bottomPadding - barHeight;
+
+      interCtx.fillStyle = "#3b82f6"; // bg-blue-500
+      interCtx.fillRect(x, y, barWidth, barHeight);
+      
+      // Add a thin white line between bars to distinguish them
+      interCtx.strokeStyle = "#ffffff"; // white
+      interCtx.lineWidth = 0.5;
+      interCtx.strokeRect(x, y, barWidth, barHeight);
+    }
+    
+    // Draw X Axis Line
+    interCtx.strokeStyle = "#e2e8f0"; // slate-200
+    interCtx.lineWidth = 1;
+    interCtx.beginPath();
+    interCtx.moveTo(xPadding, h - bottomPadding);
+    interCtx.lineTo(w - xPadding, h - bottomPadding);
+    interCtx.stroke();
+    
+    // --- Draw X Axis Labels (Request: Whole numbers only) ---
+    interCtx.fillStyle = "#475569"; // slate-600
+    interCtx.textAlign = "center";
+    
+    // Find the largest whole number to label on the axis
+    const maxLabel = Math.floor(maxVal);
+    
+    for (let i = 0; i <= maxLabel; i++) {
+        // Calculate the pixel position for each whole number 'i'
+        // (i / maxVal) gives the fractional position along the axis
+        const labelX = xPadding + (i / maxVal) * usableWidth;
+        
+        // To avoid label overlap (e.g. label '1' when maxVal is 1.0)
+        // check if this label is the last one and very close to the end.
+        if (i === maxLabel && maxVal - maxLabel < 0.1) {
+            // It's the last label and maxVal is very close to it,
+            // so draw it right at the end of the axis.
+             interCtx.fillText(i, xPadding + usableWidth, h - bottomPadding + 15);
+        } else {
+             interCtx.fillText(i, labelX, h - bottomPadding + 15);
+        }
+    }
+  }
+
+  function drawArrivalsPerSecondHistogram() {
+    const w = arrivalsCanvas.width = arrivalsCanvas.clientWidth;
+    const h = arrivalsCanvas.height = arrivalsCanvas.clientHeight;
+
+    arrivalsCtx.clearRect(0, 0, w, h);
+    
+    // --- Draw Title ---
+    arrivalsCtx.fillStyle = "#1e293b"; // slate-800
+    arrivalsCtx.font = "bold 14px Inter";
+    arrivalsCtx.textAlign = "center";
+    arrivalsCtx.fillText("Distribution of Arrivals/Sec", w / 2, 25); // New Title
+
+    const arrivalCounts = arrivalsPerSecondHistory;
+    
+    let totalSeconds = -1;
+    if (startTime) {
+      // Get current elapsed second, even if paused
+      const now = performance.now() / 1000;
+      totalSeconds = Math.floor(now - startTime);
+    }
+    
+    // This is the new histogram data:
+    // index = number of arrivals (k)
+    // value = frequency of k arrivals
+    const arrivalCountBins = [0]; // Start with bin for k=0
+    let maxK = 0; // Max number of arrivals in any second
+
+    if (totalSeconds >= 0) {
+        // We must account for seconds with 0 arrivals
+        for (let i = 0; i <= totalSeconds; i++) {
+            const k = arrivalCounts[i] || 0; // k = number of arrivals in second i (default to 0)
+            
+            // Ensure our bin array is long enough
+            if (k > maxK) {
+                maxK = k;
+                while(arrivalCountBins.length <= maxK) {
+                    arrivalCountBins.push(0);
+                }
+            }
+            
+            // This handles the case where k=0 and arrivalCountBins is just [0]
+            if(arrivalCountBins.length <= k) {
+                 while(arrivalCountBins.length <= k) {
+                    arrivalCountBins.push(0);
+                }
+            }
+            
+            arrivalCountBins[k]++; // Increment the frequency for k arrivals
+        }
+    }
+    
+    // --- This is the new binning logic ---
+    const nBins = Math.max(1, arrivalCountBins.length); // Bins are 0, 1, 2... k_max
+    const maxFreq = Math.max(1, ...arrivalCountBins); // Max frequency
+    
+    const topPadding = 40;
+    const bottomPadding = 30;
+    const xPadding = 30;
+    const usableWidth = w - xPadding * 2;
+    const usableHeight = h - topPadding - bottomPadding;
+    
+    const barWidth = Math.max(1, (usableWidth / nBins) * 0.8);
+    const barGap = (usableWidth / nBins) * 0.2;
+
+    arrivalsCtx.strokeStyle = "#e2e8f0"; // slate-200
+    arrivalsCtx.lineWidth = 1;
+    arrivalsCtx.font = "10px Inter";
+    
+    // Draw bars and labels
+    for (let i = 0; i < nBins; i++) {
+      const freq = arrivalCountBins[i] || 0;
+      const barHeight = (freq / maxFreq) * usableHeight;
+      const x = xPadding + i * (barWidth + barGap) + barGap / 2;
+      const y = h - bottomPadding - barHeight;
+
+      if (barHeight > 0) { // Only draw non-empty bars
+        arrivalsCtx.fillStyle = "#f59e0b"; // bg-amber-500
+        arrivalsCtx.fillRect(x, y, barWidth, barHeight);
+      }
+
+      // --- Draw whole number labels (k=0, k=1, k=2, ...) ---
+      arrivalsCtx.fillStyle = "#475569"; // slate-600
+      arrivalsCtx.textAlign = "center";
+      arrivalsCtx.fillText(i, x + barWidth / 2, h - bottomPadding + 15);
+    }
+    
+    // Draw Axes
+    arrivalsCtx.beginPath();
+    arrivalsCtx.moveTo(xPadding, h - bottomPadding);
+    arrivalsCtx.lineTo(w - xPadding, h - bottomPadding);
+    arrivalsCtx.stroke();
+  }
+
+  // Initial draw
+  drawInterarrivalHistogram();
+  drawArrivalsPerSecondHistogram();
+</script>
+</body>
+</html>
